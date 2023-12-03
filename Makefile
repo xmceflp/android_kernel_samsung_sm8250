@@ -359,8 +359,8 @@ HOST_LFS_LDFLAGS := $(shell getconf LFS_LDFLAGS 2>/dev/null)
 HOST_LFS_LIBS := $(shell getconf LFS_LIBS 2>/dev/null)
 
 ifneq ($(LLVM),)
-HOSTCC	= $(CLANG_DIR)clang
-HOSTCXX	= $(CLANG_DIR)clang++
+HOSTCC	= clang
+HOSTCXX	= clang++
 else
 HOSTCC	= gcc
 HOSTCXX	= g++
@@ -375,13 +375,13 @@ KBUILD_HOSTLDLIBS   := $(HOST_LFS_LIBS) $(HOSTLDLIBS)
 # Make variables (CC, etc...)
 CPP		= $(CC) -E
 ifneq ($(LLVM),)
-CC		= $(CLANG_DIR)clang
-LD		= $(CLANG_DIR)ld.lld
-AR		= $(CLANG_DIR)llvm-ar
-NM		= $(CLANG_DIR)llvm-nm
-OBJCOPY		= $(CLANG_DIR)llvm-objcopy
-OBJDUMP		= $(CLANG_DIR)llvm-objdump
-STRIP		= $(CLANG_DIR)llvm-strip
+CC		= clang
+LD		= ld.lld
+AR		= llvm-ar
+NM		= llvm-nm
+OBJCOPY		= llvm-objcopy
+OBJDUMP		= llvm-objdump
+STRIP		= llvm-strip
 else
 CC		= $(CROSS_COMPILE)gcc
 LD		= $(CROSS_COMPILE)ld
@@ -635,9 +635,8 @@ endif
 ifdef CONFIG_LTO_CLANG
 # use llvm-ar for building symbol tables from IR files, and llvm-nm instead
 # of objdump for processing symbol versions and exports
-LLVM_BIN_PATH := $(patsubst %/,%,$(dir $(shell which $(CC))))
-LLVM_AR		:= $(CLANG_DIR)/llvm-ar
-LLVM_NM		:= $(CLANG_DIR)/llvm-nm
+LLVM_AR		:= llvm-ar
+LLVM_NM		:= llvm-nm
 export LLVM_AR LLVM_NM
 endif
 
@@ -694,16 +693,7 @@ KBUILD_CFLAGS	+= $(call cc-disable-warning, address-of-packed-member)
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
 KBUILD_CFLAGS	+= -Os $(call cc-disable-warning,maybe-uninitialized,)
 else
-ifdef CONFIG_PROFILE_ALL_BRANCHES
-KBUILD_CFLAGS	+= -O2 $(call cc-disable-warning,maybe-uninitialized,)
-else
 KBUILD_CFLAGS   += -O2
-ifeq ($(CONFIG_LTO_CLANG),y)
-ifeq ($(CONFIG_LD_IS_LLD), y)
-LDFLAGS += --lto-O2
-endif
-endif
-endif
 endif
 
 KBUILD_CFLAGS += $(call cc-ifversion, -lt, 0409, \
@@ -742,11 +732,16 @@ stackp-flags-$(CONFIG_STACKPROTECTOR_STRONG)      := -fstack-protector-strong
 KBUILD_CFLAGS += $(stackp-flags-y)
 
 ifeq ($(cc-name),clang)
-ifeq ($(CONFIG_LD_IS_LLD), y)
-KBUILD_CFLAGS += -fuse-ld=lld
+ifneq ($(CROSS_COMPILE),)
+CLANG_TRIPLE	?= $(CROSS_COMPILE)
+CLANG_TARGET	:= --target=$(notdir $(CLANG_TRIPLE:%-=%))
+GCC_TOOLCHAIN	:= $(realpath $(dir $(shell which $(LD)))/..)
 endif
-KBUILD_CFLAGS += -meabi gnu
-ifeq ($(cc-name),clang)
+ifneq ($(GCC_TOOLCHAIN),)
+CLANG_GCC_TC	:= --gcc-toolchain=$(GCC_TOOLCHAIN)
+endif
+KBUILD_CFLAGS += $(CLANG_TARGET) $(CLANG_GCC_TC) -meabi gnu
+KBUILD_AFLAGS += $(CLANG_TARGET) $(CLANG_GCC_TC)
 KBUILD_CPPFLAGS += $(call cc-option,-Qunused-arguments,)
 KBUILD_CFLAGS += $(call cc-disable-warning, format-invalid-specifier)
 KBUILD_CFLAGS += $(call cc-disable-warning, gnu)
@@ -765,8 +760,6 @@ KBUILD_CFLAGS += $(call cc-disable-warning, tautological-compare)
 KBUILD_CFLAGS += $(call cc-option, -mno-global-merge,)
 KBUILD_CFLAGS += $(call cc-option, -fcatch-undefined-behavior)
 endif
-
-else
 
 # clang's -Wpointer-to-int-cast warns when casting to enums, which does not match GCC.
 # Disable that part of the warning because it is very noisy across the kernel and does
@@ -804,6 +797,8 @@ ifdef CONFIG_CC_IS_GCC
 KBUILD_CFLAGS   += $(call cc-ifversion, -lt, 0500, $(call cc-option, -fno-var-tracking-assignments))
 endif
 
+KBUILD_CFLAGS   += $(call cc-option, -fno-var-tracking-assignments)
+
 ifdef CONFIG_DEBUG_INFO
 ifdef CONFIG_DEBUG_INFO_SPLIT
 KBUILD_CFLAGS   += $(call cc-option, -gsplit-dwarf, -g)
@@ -817,11 +812,6 @@ endif
 
 ifdef CONFIG_DEBUG_INFO_DWARF4
 KBUILD_CFLAGS	+= $(call cc-option, -gdwarf-4,)
-endif
-
-ifdef CONFIG_CFP
-CFP_CC		?= $(srctree)/toolchain/llvm-arm-toolchain-ship/10.0/bin/clang
-CC		= $(srctree)/scripts/gcc-wrapper.py $(CFP_CC)
 endif
 
 ifdef CONFIG_CFP_JOPP
